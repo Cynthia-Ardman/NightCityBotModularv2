@@ -1,5 +1,7 @@
+import os
 from discord.ext import commands
-import config
+from functools import wraps
+from dotenv import load_dotenv
 
 
 def is_fixer():

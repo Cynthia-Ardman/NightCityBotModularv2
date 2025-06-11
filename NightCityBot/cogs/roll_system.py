@@ -3,8 +3,8 @@ from discord.ext import commands
 import random
 import re
 from typing import Optional
-from utils.permissions import is_fixer
-from cogs.dm_handling import DMHandler
+from NightCityBot.utils.permissions import is_fixer
+from NightCityBot.cogs.dm_handling import DMHandler
 
 class RollSystem(commands.Cog):
     def __init__(self, bot):

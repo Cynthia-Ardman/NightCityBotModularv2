@@ -1,15 +1,14 @@
+import os
 import aiohttp
-from typing import Dict, Optional
-import config
+from dotenv import load_dotenv
 
-class UnbelievaBoatAPI:
-    def __init__(self, api_token: str):
-        self.api_token = api_token
-        self.base_url = f"https://unbelievaboat.com/api/v1/guilds/{config.GUILD_ID}"
-        self.headers = {
-            "Authorization": api_token,
-            "Content-Type": "application/json"
-        }
+load_dotenv()
+
+class UnbelievaBoat:
+    def __init__(self):
+        self.api_token = os.getenv('UNBELIEVABOAT_TOKEN')
+        self.api_base = os.getenv('UNBELIEVABOAT_API', 'https://unbelievaboat.com/api')
+        self.guild_id = int(os.getenv('GUILD_ID', '0'))
 
     async def get_balance(self, user_id: int) -> Optional[Dict]:
         """Get a user's balance from UnbelievaBoat."""

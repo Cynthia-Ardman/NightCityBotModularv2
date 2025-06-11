@@ -1,14 +1,16 @@
+import os
 import discord
 from discord.ext import commands
-from typing import Optional, List
-from utils.permissions import is_fixer
-from utils.helpers import build_channel_name
-import config
+from dotenv import load_dotenv
+from NightCityBot.utils.permissions import is_fixer
 
+load_dotenv()
 
 class RPManager(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.rp_data_file = os.getenv('RP_DATA_FILE', 'data/rp_data.json')
+        self.rp_channel_id = int(os.getenv('RP_CHANNEL_ID', '0'))
 
     @commands.command()
     @commands.has_permissions(administrator=True)

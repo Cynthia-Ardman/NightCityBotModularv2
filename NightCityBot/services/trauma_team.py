@@ -1,12 +1,13 @@
-from typing import Optional, List
-import discord
-from utils.constants import TRAUMA_ROLE_COSTS
-import config
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-class TraumaTeamService:
-    def __init__(self, bot):
-        self.bot = bot
+class TraumaTeam:
+    def __init__(self):
+        self.response_channel_id = int(os.getenv('TRAUMA_RESPONSE_CHANNEL_ID', '0'))
+        self.cooldown_minutes = int(os.getenv('TRAUMA_COOLDOWN_MINUTES', '60'))
+        self.cost = int(os.getenv('TRAUMA_COST', '5000'))
 
     async def process_trauma_team_payment(
             self,

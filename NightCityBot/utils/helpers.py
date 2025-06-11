@@ -4,7 +4,10 @@ from datetime import datetime
 import discord
 from pathlib import Path
 import json
-import config
+import os
+from discord.ext import commands
+from functools import wraps
+from dotenv import load_dotenv
 
 def build_channel_name(usernames, max_length=100):
     """Builds a Discord channel name for a group RP."""

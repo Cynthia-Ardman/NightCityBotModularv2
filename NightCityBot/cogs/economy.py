@@ -1,117 +1,116 @@
+import os
 import discord
 from discord.ext import commands
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict
-from utils.permissions import is_fixer
-from utils.constants import (
-    ROLE_COSTS_BUSINESS,
-    ROLE_COSTS_HOUSING,
-    BASELINE_LIVING_COST,
-    TIER_0_INCOME_SCALE,
-    OPEN_PERCENT
-)
-from utils.helpers import load_json_file, save_json_file
-import config
-from services.unbelievaboat import UnbelievaBoatAPI
-from services.trauma_team import TraumaTeamService
+from discord import app_commands
+from typing import Optional
+import aiohttp
+import json
+from datetime import datetime, timezone
+import random
+from dotenv import load_dotenv
+from NightCityBot.utils.permissions import is_fixer
+from NightCityBot.utils.helpers import load_json_file, save_json_file
+
+# Load environment variables
+load_dotenv()
 
 
 class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.unbelievaboat = UnbelievaBoatAPI(config.UNBELIEVABOAT_API_TOKEN)
-        self.trauma_service = TraumaTeamService(bot)
+        self.currency_name = os.getenv('CURRENCY_NAME', 'eb')
+        self.starting_balance = int(os.getenv('STARTING_BALANCE', '1000'))
+        self.unbelievaboat_token = os.getenv('UNBELIEVABOAT_TOKEN')
+        self.unbelievaboat_api = os.getenv('UNBELIEVABOAT_API', 'https://unbelievaboat.com/api')
+        self.daily_min = int(os.getenv('DAILY_MIN', '100'))
+        self.daily_max = int(os.getenv('DAILY_MAX', '1000'))
+        self.ledger_file = os.getenv('LEDGER_FILE', 'data/ledger.json')
+        self.bank_data = {}
+        self.bot.loop.create_task(self.load_bank_data())
 
-    def calculate_passive_income(self, role: str, open_count: int) -> int:
-        """Calculate passive income based on role and number of shop opens."""
-        if role == "Business Tier 0":
-            return TIER_0_INCOME_SCALE.get(open_count, 0)
+    async def load_bank_data(self):
+        """Load bank data from file on startup."""
+        self.bank_data = await load_json_file(self.ledger_file, default={})
 
-        base_rent = ROLE_COSTS_BUSINESS.get(role, 500)
-        return int(base_rent * OPEN_PERCENT[open_count])
+    async def save_bank_data(self):
+        """Save current bank data to file."""
+        await save_json_file(self.ledger_file, self.bank_data)
 
-    async def apply_passive_income(
-            self,
-            member: discord.Member,
-            applicable_roles: List[str],
-            business_open_log: Dict,
-            log: List[str]
-    ) -> tuple[Optional[int], Optional[int]]:
-        """Apply passive income based on business opens and roles."""
-        total_income = 0
+    async def get_balance(self, user_id: str) -> int:
+        """Get a user's current balance."""
+        return self.bank_data.get(str(user_id), self.starting_balance)
 
-        member_id_str = str(member.id)
-        opens_this_month = [
-            ts for ts in business_open_log.get(member_id_str, [])
-            if datetime.fromisoformat(ts).month == datetime.utcnow().month and
-               datetime.fromisoformat(ts).year == datetime.utcnow().year
-        ]
-        open_count = min(len(opens_this_month), 4)
+    async def set_balance(self, user_id: str, amount: int):
+        """Set a user's balance and save to file."""
+        self.bank_data[str(user_id)] = amount
+        await self.save_bank_data()
 
-        for role in applicable_roles:
-            if "Housing Tier" in role:
-                continue
+    @commands.hybrid_command()
+    async def balance(self, ctx, user: Optional[discord.Member] = None):
+        """Check your current balance or another user's balance."""
+        target = user or ctx.author
+        balance = await self.get_balance(str(target.id))
 
-            income = self.calculate_passive_income(role, open_count)
-            log.append(f"💰 Passive income for {role}: ${income} ({open_count} opens)")
-            total_income += income
+        if target == ctx.author:
+            await ctx.send(f"You have {balance:,} {self.currency_name}")
+        else:
+            await ctx.send(f"{target.display_name} has {balance:,} {self.currency_name}")
 
-        if total_income > 0:
-            success = await self.unbelievaboat.update_balance(
-                member.id,
-                {"cash": total_income},
-                reason="Passive income"
-            )
-            if success:
-                updated = await self.unbelievaboat.get_balance(member.id)
-                log.append(f"➕ Added ${total_income} passive income.")
-                if updated:
-                    return updated["cash"], updated["bank"]
-
-        current = await self.unbelievaboat.get_balance(member.id)
-        if current:
-            return current["cash"], current["bank"]
-        return None, None
-
-    @commands.command()
-    @commands.has_permissions(send_messages=True)
-    async def open_shop(self, ctx):
-        """Log a business opening (Sunday only)."""
-        if ctx.channel.id != config.BUSINESS_ACTIVITY_CHANNEL_ID:
-            await ctx.send("❌ You can only log business openings in the designated business activity channel.")
+    @commands.hybrid_command()
+    @is_fixer()
+    async def give(self, ctx, user: discord.Member, amount: int):
+        """Give currency to a user (Fixer only)."""
+        if amount <= 0:
+            await ctx.send("❌ Amount must be positive.")
             return
 
-        now = datetime.utcnow()
-        if now.weekday() != 6:
-            await ctx.send("❌ Business openings can only be logged on Sundays.")
+        current = await self.get_balance(str(user.id))
+        await self.set_balance(str(user.id), current + amount)
+
+        await ctx.send(
+            f"✅ Gave {amount:,} {self.currency_name} to {user.display_name}. "
+            f"They now have {current + amount:,} {self.currency_name}."
+        )
+
+    @commands.hybrid_command()
+    @is_fixer()
+    async def take(self, ctx, user: discord.Member, amount: int):
+        """Remove currency from a user (Fixer only)."""
+        if amount <= 0:
+            await ctx.send("❌ Amount must be positive.")
             return
 
+        current = await self.get_balance(str(user.id))
+        new_balance = max(0, current - amount)
+        await self.set_balance(str(user.id), new_balance)
+
+        actual_amount = current - new_balance
+        await ctx.send(
+            f"✅ Took {actual_amount:,} {self.currency_name} from {user.display_name}. "
+            f"They now have {new_balance:,} {self.currency_name}."
+        )
+
+    @commands.hybrid_command()
+    async def daily(self, ctx):
+        """Claim your daily reward."""
         user_id = str(ctx.author.id)
-        now_str = now.isoformat()
+        last_daily = self.bank_data.get(f"{user_id}_last_daily")
 
-        data = await load_json_file(config.OPEN_LOG_FILE, default={})
+        now = datetime.now(timezone.utc)
+        if last_daily:
+            last_claim = datetime.fromisoformat(last_daily)
+            if (now - last_claim).days < 1:
+                time_left = datetime.fromtimestamp(last_claim.timestamp() + 86400, timezone.utc)
+                await ctx.send(f"❌ You can claim again at <t:{int(time_left.timestamp())}:R>")
+                return
 
-        all_opens = data.get(user_id, [])
-        this_month_opens = [
-            datetime.fromisoformat(ts)
-            for ts in all_opens
-            if datetime.fromisoformat(ts).month == now.month and
-               datetime.fromisoformat(ts).year == now.year
-        ]
+        amount = random.randint(self.daily_min, self.daily_max)
+        current = await self.get_balance(user_id)
+        await self.set_balance(user_id, current + amount)
+        self.bank_data[f"{user_id}_last_daily"] = now.isoformat()
+        await self.save_bank_data()
 
-        if any(ts.date() == now.date() for ts in this_month_opens):
-            await ctx.send("❌ You've already logged a business opening today.")
-            return
-
-        if len(this_month_opens) >= 4:
-            await ctx.send("❌ You've already used all 4 business posts for this month.")
-            return
-
-        all_opens.append(now_str)
-        data[user_id] = all_opens
-        await save_json_file(config.OPEN_LOG_FILE, data)
-
-        await ctx.send(f"✅ Business opening logged! ({len(this_month_opens) + 1}/4 this month)")
-
-    # Add other economy-related commands (collect_rent, collect_housing, etc.)
-    # [Rest of the economy commands would go here]
+        await ctx.send(
+            f"✅ You received {amount:,} {self.currency_name}. "
+            f"You now have {current + amount:,} {self.currency_name}."
+        )

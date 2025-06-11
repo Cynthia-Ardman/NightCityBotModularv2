@@ -1,13 +1,17 @@
+import os
 import discord
 from discord.ext import commands
-from typing import Optional
-import config
-from utils.permissions import is_fixer
+from dotenv import load_dotenv
+from NightCityBot.utils.permissions import is_fixer
 
+load_dotenv()
 
 class Admin(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.admin_channel_id = int(os.getenv('ADMIN_CHANNEL_ID', '0'))
+        self.log_channel_id = int(os.getenv('LOG_CHANNEL_ID', '0'))
+        self.guild_id = int(os.getenv('GUILD_ID', '0'))
 
     @commands.command()
     @is_fixer()

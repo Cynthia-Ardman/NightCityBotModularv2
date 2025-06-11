@@ -1,29 +1,35 @@
+import os
 import discord
 from discord.ext import commands
 from discord.abc import Messageable
 from typing import Union, Dict
 import json
-import config
-from utils.permissions import is_fixer
-from utils.helpers import load_json_file, save_json_file
+from dotenv import load_dotenv
+from NightCityBot.utils.permissions import is_fixer
+from NightCityBot.utils.helpers import load_json_file, save_json_file
 
+# Load environment variables
+load_dotenv()
 
 class DMHandler(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.dm_threads: Dict[str, int] = {}
+        self.thread_map_file = os.getenv('THREAD_MAP_FILE', 'data/thread_map.json')
+        self.dm_inbox_channel_id = int(os.getenv('DM_INBOX_CHANNEL_ID', '0'))
+        self.fixer_role_name = os.getenv('FIXER_ROLE_NAME', 'Fixer')
         self.bot.loop.create_task(self.load_thread_cache())
 
     async def load_thread_cache(self):
         """Load the thread mapping cache on startup."""
-        self.dm_threads = await load_json_file(config.THREAD_MAP_FILE, default={})
+        self.dm_threads = await load_json_file(self.thread_map_file, default={})
 
     async def get_or_create_dm_thread(
             self,
             user: discord.abc.User
     ) -> Union[discord.Thread, discord.TextChannel]:
         """Return the logging thread for a DM sender, creating it if necessary."""
-        log_channel = self.bot.get_channel(config.DM_INBOX_CHANNEL_ID)
+        log_channel = self.bot.get_channel(self.dm_inbox_channel_id)
         user_id = str(user.id)
 
         if user_id in self.dm_threads:
@@ -52,7 +58,7 @@ class DMHandler(commands.Cog):
             raise RuntimeError("DM inbox must be a TextChannel or ForumChannel")
 
         self.dm_threads[user_id] = thread.id
-        await save_json_file(config.THREAD_MAP_FILE, self.dm_threads)
+        await save_json_file(self.thread_map_file, self.dm_threads)
 
         return thread
 

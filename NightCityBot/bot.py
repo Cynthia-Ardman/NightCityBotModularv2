@@ -1,16 +1,20 @@
+import os
 import discord
 from discord.ext import commands
-import config
-from utils.permissions import is_fixer
-from cogs.dm_handling import DMHandler
-from cogs.economy import Economy
-from cogs.rp_manager import RPManager
-from cogs.roll_system import RollSystem
-from cogs.admin import Admin
-from cogs.test_suite import TestSuite
+from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
+# Import cogs
+from NightCityBot.cogs.dm_handling import DMHandler
+from NightCityBot.cogs.economy import Economy
+from NightCityBot.cogs.rp_manager import RPManager
+from NightCityBot.cogs.roll_system import RollSystem
+from NightCityBot.cogs.admin import Admin
+from NightCityBot.cogs.test_suite import TestSuite
+
+# Load environment variables
+load_dotenv()
 
 class NightCityBot(commands.Bot):
     def __init__(self):
@@ -21,7 +25,7 @@ class NightCityBot(commands.Bot):
         intents.dm_messages = True
 
         super().__init__(
-            command_prefix="!",
+            command_prefix=os.getenv('BOT_PREFIX', '!'),
             help_command=None,
             intents=intents
         )
@@ -41,26 +45,21 @@ class NightCityBot(commands.Bot):
 
 app = Flask('')
 
-
 @app.route('/')
 def home():
     return "Bot is alive Version 1.2!"
 
-
 def run_flask():
     app.run(host='0.0.0.0', port=5000)
-
 
 def keep_alive():
     t = Thread(target=run_flask)
     t.start()
 
-
 def main():
     bot = NightCityBot()
     keep_alive()
-    bot.run(config.TOKEN)
-
+    bot.run(os.getenv('DISCORD_TOKEN'))
 
 if __name__ == "__main__":
     main()

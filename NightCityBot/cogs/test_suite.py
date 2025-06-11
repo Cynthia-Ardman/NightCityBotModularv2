@@ -1,17 +1,15 @@
+import os
 import discord
 from discord.ext import commands
-import time
-from datetime import datetime
-import os
-from typing import List, Dict, Optional
-from unittest.mock import AsyncMock, MagicMock
-import config
-from utils.permissions import is_fixer
-from utils.constants import ROLE_COSTS_BUSINESS, ROLE_COSTS_HOUSING
+from dotenv import load_dotenv
+from NightCityBot.utils.permissions import is_fixer
+
+load_dotenv()
 
 class TestSuite(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.test_channel_id = int(os.getenv('TEST_CHANNEL_ID', '0'))
         self.test_descriptions = {
             "test_dm_roll_relay": "Relays a roll to a user's DM forum thread using `!dm`.",
             "test_roll_direct_dm": "User runs `!roll` in a DM. Verifies result is DM'd and logged to DM thread.",
