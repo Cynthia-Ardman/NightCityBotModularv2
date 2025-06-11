@@ -1,32 +1,35 @@
-import json
-import aiofiles
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional, Union, Dict
+import discord
+from discord.ext import commands
+from NightCityBot.utils.config import config
+from NightCityBot.utils.db import db
 
-async def load_json_file(file_path: str, default: Any = None) -> Any:
-    """Load JSON data from a file with async IO."""
-    path = Path(file_path)
-    try:
-        if path.exists():
-            async with aiofiles.open(str(path), 'r') as f:
-                content = await f.read()
-                return json.loads(content)
-        return default
-    except Exception as e:
-        print(f"Error loading {path.name}: {e}")
-        return default
 
-async def save_json_file(file_path: str, data: Any) -> None:
-    """Save JSON data to a file with async IO."""
-    path = Path(file_path)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(str(path), 'w') as f:
-            await f.write(json.dumps(data, indent=2))
-    except Exception as e:
-        print(f"Error saving {path.name}: {e}")
+async def log_audit(
+        user: Union[discord.Member, discord.User],
+        action_desc: str,
+        *,
+        error: bool = False
+) -> None:
+    """Log an action to the audit channel."""
+    audit_channel = user.guild.get_channel(config.channels['admin'])
+    if not isinstance(audit_channel, discord.TextChannel):
+        print(f"[AUDIT] Skipped: Channel {config.channels['admin']} is not a TextChannel")
+        return
 
-def build_channel_name(usernames, max_length=100):
+    embed = discord.Embed(
+        title="📝 Audit Log",
+        color=discord.Color.red() if error else discord.Color.blue()
+    )
+    embed.add_field(name="User", value=f"{user} ({user.id})", inline=False)
+    embed.add_field(name="Action", value=action_desc, inline=False)
+
+    await audit_channel.send(embed=embed)
+    print(f"[AUDIT] {user}: {action_desc}")
+
+
+def build_channel_name(usernames: list[tuple[str, int]], max_length: int = 100) -> str:
     """Build a Discord-friendly channel name."""
     import re
     full_name = "text-rp-" + "-".join(f"{name}-{uid}" for name, uid in usernames)
