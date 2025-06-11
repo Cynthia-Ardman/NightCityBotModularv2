@@ -1,10 +1,13 @@
 import os
 import discord
 from discord.ext import commands
+from typing import Optional, Union
 from dotenv import load_dotenv
 from NightCityBot.utils.permissions import is_fixer
+from NightCityBot.utils.helpers import load_json_file, save_json_file
 
 load_dotenv()
+
 
 class Admin(commands.Cog):
     def __init__(self, bot):
@@ -15,128 +18,82 @@ class Admin(commands.Cog):
 
     @commands.command()
     @is_fixer()
+    async def ping(self, ctx):
+        """Get the bot's current latency."""
+        latency = round(self.bot.latency * 1000)
+        await ctx.send(f"🏓 Pong! ({latency}ms)")
+
+    @commands.command()
+    @is_fixer()
     async def post(self, ctx, destination: str, *, message: Optional[str] = None):
-        """Posts a message to the specified channel or thread."""
-        dest_channel = None
+        """Post a message to a specified channel."""
+        try:
+            # Get the target channel
+            channel = await commands.TextChannelConverter().convert(ctx, destination)
 
-        # Resolve by ID
-        if destination.isdigit():
-            try:
-                dest_channel = await ctx.guild.fetch_channel(int(destination))
-            except discord.NotFound:
-                dest_channel = None
-        else:
-            # Try finding by name or as a thread
-            dest_channel = discord.utils.get(ctx.guild.text_channels, name=destination)
-            if dest_channel is None:
-                for channel in ctx.guild.text_channels:
-                    threads = channel.threads
-                    dest_channel = discord.utils.get(threads, name=destination)
-                    if dest_channel:
-                        break
+            if not channel:
+                await ctx.send("❌ Could not find the specified channel.")
+                return
 
-        if dest_channel is None:
-            await ctx.send(f"❌ Couldn't find channel/thread '{destination}'.")
-            return
+            # Handle attachments
+            files = [await a.to_file() for a in ctx.message.attachments]
 
-        files = [await attachment.to_file() for attachment in ctx.message.attachments]
+            # Send the message
+            await channel.send(content=message, files=files)
+            await ctx.send("✅ Message posted successfully.")
 
-        if message or files:
-            if message and message.strip().startswith("!"):
-                command_text = message.strip()
-                fake_msg = ctx.message
-                fake_msg.content = command_text
-                fake_ctx = await self.bot.get_context(fake_msg)
-                fake_ctx.channel = dest_channel
-                fake_ctx.author = ctx.author
-                setattr(fake_ctx, "original_author", ctx.author)
+        except commands.ChannelNotFound:
+            await ctx.send("❌ Channel not found.")
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have permission to post in that channel.")
+        except Exception as e:
+            await ctx.send(f"❌ An error occurred: {str(e)}")
 
-                await self.bot.invoke(fake_ctx)
-                await ctx.send(f"✅ Executed `{command_text}` in {dest_channel.mention}.")
-            else:
-                await dest_channel.send(content=message, files=files)
-                await ctx.send(f"✅ Posted anonymously to {dest_channel.mention}.")
-        else:
-            await ctx.send("❌ Provide a message or attachment.")
+    @commands.command()
+    @is_fixer()
+    async def status(self, ctx):
+        """Check the bot's status and configurations."""
+        embed = discord.Embed(title="Bot Status", color=discord.Color.blue())
 
-    @commands.command(name="help")
-    async def block_help(self, ctx):
-        await ctx.send("❌ `!help` is disabled. Use `!helpme` or `!helpfixer` instead.")
-
-    @commands.command(name="helpme")
-    async def helpme(self, ctx):
-        """Display help for regular users."""
-        embed = discord.Embed(
-            title="📘 NCRP Bot — Player Help",
-            description="Basic commands for RP, rent, and rolling dice. Use `!helpfixer` if you're a Fixer.",
-            color=discord.Color.teal()
-        )
-
+        # Add basic info
         embed.add_field(
-            name="🎲 RP Tools",
-            value=(
-                "`!roll [XdY+Z]`\n"
-                "→ Roll dice in any channel or DM.\n"
-                "→ Netrunner Level 2 = +1, Level 3 = +2 bonus.\n"
-                "→ Roll results in DMs are logged privately."
-            ),
+            name="Basic Info",
+            value=f"Latency: {round(self.bot.latency * 1000)}ms\n"
+                  f"Guilds: {len(self.bot.guilds)}\n"
+                  f"Commands: {len(self.bot.commands)}",
             inline=False
         )
 
+        # Add channel configurations
         embed.add_field(
-            name="💰 Rent & Cost of Living",
-            value=(
-                "Everyone pays a **$500/month** baseline fee for survival (food, water, etc).\n"
-                "Even if you don't have a house or business — you're still eating Prepack.\n\n"
-                "`!open_shop`\n"
-                "→ Shop owners log up to 4 openings/month (Sundays only).\n"
-                "→ Increases passive income if you're active."
-            ),
+            name="Channels",
+            value=f"Admin: <#{self.admin_channel_id}>\n"
+                  f"Logs: <#{self.log_channel_id}>",
             inline=False
         )
 
-        # Add other help fields...
-
-        embed.set_footer(text="Use !roll, pay your rent, stay alive.")
         await ctx.send(embed=embed)
 
-    @commands.command(name="helpfixer")
-    async def helpfixer(self, ctx):
-        """Display help for fixers."""
-        embed = discord.Embed(
-            title="🛠️ NCRP Bot — Fixer & Admin Help",
-            description="Advanced commands for messaging, RP management, rent, and testing.",
-            color=discord.Color.purple()
-        )
+    @commands.command()
+    @is_fixer()
+    async def cleanup(self, ctx, limit: Optional[int] = 100):
+        """Clean up bot messages and commands in the current channel."""
 
-        # Add fixer help fields...
+        def is_bot_or_command(message):
+            return message.author == self.bot.user or \
+                message.content.startswith(self.bot.command_prefix)
 
-        embed.set_footer(text="Fixer tools by MedusaCascade | v1.2")
-        await ctx.send(embed=embed)
-
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        """Global error handler for commands."""
-        if isinstance(error, commands.CommandNotFound):
-            await ctx.send("❌ Unknown command.")
-            await self.log_audit(ctx.author, f"❌ Unknown command: {ctx.message.content}")
-        elif isinstance(error, commands.CheckFailure):
-            await ctx.send("❌ Permission denied.")
-            await self.log_audit(ctx.author, f"❌ Permission denied: {ctx.message.content}")
-        else:
-            await ctx.send(f"⚠️ Error: {str(error)}")
-            await self.log_audit(ctx.author, f"⚠️ Error: {ctx.message.content} → {str(error)}")
-
-    async def log_audit(self, user, action_desc):
-        """Log an audit entry to the audit channel."""
-        audit_channel = self.bot.get_channel(config.AUDIT_LOG_CHANNEL_ID)
-
-        if isinstance(audit_channel, discord.TextChannel):
-            embed = discord.Embed(title="📝 Audit Log", color=discord.Color.blue())
-            embed.add_field(name="User", value=f"{user} ({user.id})", inline=False)
-            embed.add_field(name="Action", value=action_desc, inline=False)
-            await audit_channel.send(embed=embed)
-        else:
-            print(f"[AUDIT] Skipped: Channel {config.AUDIT_LOG_CHANNEL_ID} is not a TextChannel")
-
-        print(f"[AUDIT] {user}: {action_desc}")
+        try:
+            deleted = await ctx.channel.purge(
+                limit=limit,
+                check=is_bot_or_command,
+                before=ctx.message
+            )
+            await ctx.send(
+                f"✅ Cleaned up {len(deleted)} messages.",
+                delete_after=5
+            )
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have permission to delete messages.")
+        except Exception as e:
+            await ctx.send(f"❌ An error occurred: {str(e)}")

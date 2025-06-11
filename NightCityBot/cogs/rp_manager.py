@@ -1,120 +1,132 @@
 import os
 import discord
 from discord.ext import commands
+from typing import Optional, Dict, Union
 from dotenv import load_dotenv
 from NightCityBot.utils.permissions import is_fixer
+from NightCityBot.utils.helpers import load_json_file, save_json_file
 
 load_dotenv()
+
 
 class RPManager(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.rp_data_file = os.getenv('RP_DATA_FILE', 'data/rp_data.json')
         self.rp_channel_id = int(os.getenv('RP_CHANNEL_ID', '0'))
+        self.active_sessions: Dict[str, dict] = {}
+        self.bot.loop.create_task(self.load_rp_data())
 
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def start_rp(self, ctx, *user_identifiers: str):
-        """Starts a private RP channel for the mentioned users."""
-        guild = ctx.guild
-        users = []
+    async def load_rp_data(self):
+        """Load RP session data from file on startup."""
+        self.active_sessions = await load_json_file(self.rp_data_file, default={})
 
-        for identifier in user_identifiers:
-            if identifier.isdigit():
-                member = guild.get_member(int(identifier))
-            else:
-                match = re.findall(r"<@!?(\d+)>", identifier)
-                member = guild.get_member(int(match[0])) if match else None
-            if member:
-                users.append(member)
+    async def save_rp_data(self):
+        """Save current RP session data to file."""
+        await save_json_file(self.rp_data_file, self.active_sessions)
 
-        if not users:
-            await ctx.send("❌ Could not resolve any users.")
-            return
+    @commands.group(invoke_without_command=True)
+    async def rp(self, ctx):
+        """RP management commands."""
+        if ctx.invoked_subcommand is None:
+            await ctx.send("Available commands: `start`, `end`, `join`, `leave`, `list`")
 
-        channel = await self.create_group_rp_channel(guild, users)
-        mentions = " ".join(user.mention for user in users)
-        fixer_role = await ctx.guild.fetch_role(config.FIXER_ROLE_ID)
-        fixer_mention = fixer_role.mention if fixer_role else ""
-
-        await channel.send(f"✅ RP session created! {mentions} {fixer_mention}")
-        await ctx.send(f"✅ RP channel created: {channel.mention}")
-        return channel
-
-    @commands.command()
-    @is_fixer()
-    async def end_rp(self, ctx):
-        """Ends the RP session in the current channel."""
-        channel = ctx.channel
-        if not channel.name.startswith("text-rp-"):
-            await ctx.send("❌ This command can only be used in an RP session channel.")
-            return
-
-        await ctx.send("📝 Ending RP session, logging contents and deleting channel...")
-        await self.end_rp_session(channel)
-
-    async def create_group_rp_channel(
+    @rp.command()
+    async def start(
             self,
-            guild: discord.Guild,
-            users: list[discord.Member],
-            category: Optional[discord.CategoryChannel] = None
+            ctx,
+            name: str,
+            category: Optional[discord.CategoryChannel] = None,
+            *players: discord.Member
     ):
-        """Creates a private RP channel for a group of users."""
-        usernames = [(user.name, user.id) for user in users]
-        channel_name = build_channel_name(usernames)
+        """Start a new RP session."""
+        if name in self.active_sessions:
+            await ctx.send("❌ An RP session with that name already exists.")
+            return
 
-        allowed_roles = {"Fixer", "Admin"}
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        # Create new session
+        session = {
+            "name": name,
+            "dm": ctx.author.id,
+            "players": [p.id for p in players] if players else [],
+            "category_id": category.id if category else None,
+            "channels": []
         }
 
-        for user in users:
-            overwrites[user] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        self.active_sessions[name] = session
+        await self.save_rp_data()
 
-        for role in guild.roles:
-            if role.name in allowed_roles:
-                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-
-        return await guild.create_text_channel(
-            name=channel_name,
-            overwrites=overwrites,
-            category=category,
-            reason="Creating private RP group channel"
+        players_mention = " ".join(p.mention for p in players) if players else "No players yet"
+        await ctx.send(
+            f"✅ Started RP session '{name}'\n"
+            f"**DM:** {ctx.author.mention}\n"
+            f"**Players:** {players_mention}"
         )
 
-    async def end_rp_session(self, channel: discord.TextChannel):
-        """Archives and ends an RP session."""
-        log_channel = channel.guild.get_channel(config.GROUP_AUDIT_LOG_CHANNEL_ID)
-        if not isinstance(log_channel, discord.ForumChannel):
-            await channel.send("⚠️ Logging failed: audit log channel is not a ForumChannel.")
+    @rp.command()
+    async def end(self, ctx, name: str):
+        """End an RP session."""
+        if name not in self.active_sessions:
+            await ctx.send("❌ No RP session with that name exists.")
             return
 
-        participants = channel.name.replace("text-rp-", "").split("-")
-        thread_name = "GroupRP-" + "-".join(participants)
+        session = self.active_sessions[name]
+        if ctx.author.id != session["dm"] and not await is_fixer().predicate(ctx):
+            await ctx.send("❌ Only the session DM or a Fixer can end the session.")
+            return
 
-        created = await log_channel.create_thread(
-            name=thread_name,
-            content=f"📘 RP log for `{channel.name}`"
-        )
+        del self.active_sessions[name]
+        await self.save_rp_data()
+        await ctx.send(f"✅ Ended RP session '{name}'")
 
-        log_thread = created.thread if hasattr(created, "thread") else created
-        log_thread = cast(discord.Thread, log_thread)
+    @rp.command()
+    async def join(self, ctx, name: str):
+        """Join an RP session."""
+        if name not in self.active_sessions:
+            await ctx.send("❌ No RP session with that name exists.")
+            return
 
-        async for msg in channel.history(limit=None, oldest_first=True):
-            ts = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            content = msg.content or "*(No text content)*"
-            entry = f"[{ts}] 📥 **Received from {msg.author.display_name}**:\n{content}"
+        session = self.active_sessions[name]
+        if ctx.author.id in session["players"]:
+            await ctx.send("❌ You're already in this session.")
+            return
 
-            if msg.attachments:
-                for attachment in msg.attachments:
-                    entry += f"\n📎 Attachment: {attachment.url}"
+        session["players"].append(ctx.author.id)
+        await self.save_rp_data()
+        await ctx.send(f"✅ {ctx.author.mention} joined RP session '{name}'")
 
-            if len(entry) <= 2000:
-                await log_thread.send(entry)
-            else:
-                chunks = [entry[i:i + 1990] for i in range(0, len(entry), 1990)]
-                for chunk in chunks:
-                    await log_thread.send(chunk)
+    @rp.command()
+    async def leave(self, ctx, name: str):
+        """Leave an RP session."""
+        if name not in self.active_sessions:
+            await ctx.send("❌ No RP session with that name exists.")
+            return
 
-        await channel.delete(reason="RP session ended and logged.")
+        session = self.active_sessions[name]
+        if ctx.author.id not in session["players"]:
+            await ctx.send("❌ You're not in this session.")
+            return
+
+        session["players"].remove(ctx.author.id)
+        await self.save_rp_data()
+        await ctx.send(f"✅ {ctx.author.mention} left RP session '{name}'")
+
+    @rp.command(name="list")
+    async def list_sessions(self, ctx):
+        """List all active RP sessions."""
+        if not self.active_sessions:
+            await ctx.send("No active RP sessions.")
+            return
+
+        for name, session in self.active_sessions.items():
+            dm = ctx.guild.get_member(session["dm"])
+            players = [ctx.guild.get_member(pid) for pid in session["players"]]
+            players = [p for p in players if p]  # Filter out None values
+
+            players_text = "\n".join(f"- {p.display_name}" for p in players) or "No players"
+
+            await ctx.send(
+                f"**{name}**\n"
+                f"DM: {dm.display_name if dm else 'Unknown'}\n"
+                f"Players:\n{players_text}"
+            )

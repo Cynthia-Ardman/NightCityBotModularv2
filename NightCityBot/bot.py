@@ -12,6 +12,7 @@ from NightCityBot.cogs.rp_manager import RPManager
 from NightCityBot.cogs.roll_system import RollSystem
 from NightCityBot.cogs.admin import Admin
 from NightCityBot.cogs.test_suite import TestSuite
+from NightCityBot.cogs.trauma_team import TraumaTeam
 
 # Load environment variables
 load_dotenv()
@@ -38,11 +39,12 @@ class NightCityBot(commands.Bot):
         await self.add_cog(RollSystem(self))
         await self.add_cog(Admin(self))
         await self.add_cog(TestSuite(self))
+        await self.add_cog(TraumaTeam(self))
 
     async def on_ready(self):
         print(f"✅ {self.user.name} is running!")
 
-
+# Flask keep-alive server
 app = Flask('')
 
 @app.route('/')

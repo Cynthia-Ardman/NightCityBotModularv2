@@ -1,16 +1,34 @@
-from typing import Optional, List
-import re
-from datetime import datetime
-import discord
-from pathlib import Path
 import json
-import os
-from discord.ext import commands
-from functools import wraps
-from dotenv import load_dotenv
+import aiofiles
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+async def load_json_file(file_path: str, default: Any = None) -> Any:
+    """Load JSON data from a file with async IO."""
+    path = Path(file_path)
+    try:
+        if path.exists():
+            async with aiofiles.open(str(path), 'r') as f:
+                content = await f.read()
+                return json.loads(content)
+        return default
+    except Exception as e:
+        print(f"Error loading {path.name}: {e}")
+        return default
+
+async def save_json_file(file_path: str, data: Any) -> None:
+    """Save JSON data to a file with async IO."""
+    path = Path(file_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(str(path), 'w') as f:
+            await f.write(json.dumps(data, indent=2))
+    except Exception as e:
+        print(f"Error saving {path.name}: {e}")
 
 def build_channel_name(usernames, max_length=100):
-    """Builds a Discord channel name for a group RP."""
+    """Build a Discord-friendly channel name."""
+    import re
     full_name = "text-rp-" + "-".join(f"{name}-{uid}" for name, uid in usernames)
     if len(full_name) <= max_length:
         return re.sub(r"[^a-z0-9\-]", "", full_name.lower())
@@ -20,23 +38,3 @@ def build_channel_name(usernames, max_length=100):
         simple_name = simple_name[:max_length]
 
     return re.sub(r"[^a-z0-9\-]", "", simple_name.lower())
-
-async def load_json_file(file_path: Path, default=None):
-    """Safely load a JSON file with fallback to default value."""
-    try:
-        if file_path.exists():
-            async with aiofiles.open(file_path, 'r') as f:
-                return json.loads(await f.read())
-    except Exception as e:
-        print(f"Error loading {file_path.name}: {e}")
-    return default if default is not None else {}
-
-async def save_json_file(file_path: Path, data):
-    """Safely save data to a JSON file."""
-    try:
-        async with aiofiles.open(file_path, 'w') as f:
-            await f.write(json.dumps(data, indent=2))
-        return True
-    except Exception as e:
-        print(f"Error saving {file_path.name}: {e}")
-        return False

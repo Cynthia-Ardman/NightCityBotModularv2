@@ -1,28 +1,35 @@
 import os
+import discord
 from dotenv import load_dotenv
+from typing import Optional, List, Dict
+from NightCityBot.utils.constants import TRAUMA_ROLE_COSTS
+from NightCityBot.services.unbelievaboat import UnbelievaBoatAPI
 
 load_dotenv()
 
 class TraumaTeam:
     def __init__(self):
         self.response_channel_id = int(os.getenv('TRAUMA_RESPONSE_CHANNEL_ID', '0'))
+        self.trauma_forum_channel_id = int(os.getenv('TRAUMA_FORUM_CHANNEL_ID', '0'))
+        self.trauma_team_role_id = int(os.getenv('TRAUMA_TEAM_ROLE_ID', '0'))
         self.cooldown_minutes = int(os.getenv('TRAUMA_COOLDOWN_MINUTES', '60'))
         self.cost = int(os.getenv('TRAUMA_COST', '5000'))
+        self.unbelievaboat = UnbelievaBoatAPI()
 
     async def process_trauma_team_payment(
             self,
             member: discord.Member,
+            trauma_channel: discord.ForumChannel,
             *,
             log: Optional[List[str]] = None
     ) -> None:
         """Process Trauma Team subscription payment for a member."""
-        trauma_channel = self.bot.get_channel(config.TRAUMA_FORUM_CHANNEL_ID)
         if not isinstance(trauma_channel, discord.ForumChannel):
             if log is not None:
                 log.append("⚠️ TT forum channel not found.")
             return
 
-        balance = await self.bot.get_cog('Economy').unbelievaboat.get_balance(member.id)
+        balance = await self.unbelievaboat.get_balance(member.id)
         if not balance:
             if log is not None:
                 log.append("⚠️ Could not fetch balance for Trauma processing.")
@@ -55,7 +62,7 @@ class TraumaTeam:
             return
 
         if cash + bank < cost:
-            mention = f"<@&{config.TRAUMA_TEAM_ROLE_ID}>"
+            mention = f"<@&{self.trauma_team_role_id}>"
             await target_thread.send(
                 f"❌ Payment for **{trauma_role.name}** (${cost}) by <@{member.id}> failed."
                 f"\n## {mention} Subscription suspended."
@@ -68,7 +75,7 @@ class TraumaTeam:
             "cash": -min(cash, cost),
             "bank": -(cost - min(cash, cost)),
         }
-        success = await self.bot.get_cog('Economy').unbelievaboat.update_balance(
+        success = await self.unbelievaboat.update_balance(
             member.id,
             payload,
             reason="Trauma Team Subscription"

@@ -1,10 +1,10 @@
+import re
+import random
 import discord
 from discord.ext import commands
-import random
-import re
 from typing import Optional
+from NightCityBot.utils.helpers import load_json_file, save_json_file
 from NightCityBot.utils.permissions import is_fixer
-from NightCityBot.cogs.dm_handling import DMHandler
 
 class RollSystem(commands.Cog):
     def __init__(self, bot):
@@ -12,6 +12,7 @@ class RollSystem(commands.Cog):
 
     @commands.command()
     async def roll(self, ctx, *, dice: str):
+        """Roll dice with optional user mention and Netrunner bonuses."""
         original_sender = getattr(ctx, "original_author", None)
 
         # Extract user mention if present
@@ -35,6 +36,7 @@ class RollSystem(commands.Cog):
             await self.loggable_roll(roller, ctx.channel, dice)
 
     async def loggable_roll(self, author, channel, dice: str, *, original_sender=None):
+        """Process and log a dice roll with proper formatting and bonus calculation."""
         pattern = r'(?:(\d*)d)?(\d+)([+-]\d+)?'
         m = re.fullmatch(pattern, dice.replace(' ', ''))
         if not m:
