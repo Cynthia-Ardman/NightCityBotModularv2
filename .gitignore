@@ -1,0 +1,13 @@
+# Ignore everything
+*
+!.gitignore
+!NightCityBot/
+!NightCityBot/**
+
+# Python specific ignores
+__pycache__/
+*.py[cod]
+.env
+config.json
+.DS_Store
+.idea/
