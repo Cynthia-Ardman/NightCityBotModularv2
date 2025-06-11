@@ -186,4 +186,52 @@ class DMHandler(commands.Cog):
                 print(f"[ERROR] Cannot log DM — thread type is {type(thread)}")
 
         except discord.Forbidden:
+            async def handle_roll_relay(self, message: discord.Message, target_user: discord.User):
+                """Handle roll command relay."""
+                dice = message.content.strip()[len("!roll"):].strip()
+                ctx = await self.bot.get_context(message)
+                setattr(ctx, "original_author", message.author)
+                ctx.author = target_user
+                ctx.channel = await target_user.create_dm()
+
+                roll_cog = self.bot.get_cog('RollSystem')
+                if roll_cog:
+                    await roll_cog.roll(ctx, dice=dice)
+
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+
+            async def relay_to_user(self, message: discord.Message, target_user: discord.User):
+                """Relay a message to a user and log it."""
+                files = [await a.to_file() for a in message.attachments]
+                await target_user.send(content=message.content or None, files=files)
+                await message.channel.send(
+                    f"📤 **Sent to {target_user.display_name} "
+                    f"by {message.author.display_name}:**\n{message.content}"
+                )
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+
+            async def handle_dm_message(self, message: discord.Message):
+                """Handle and log incoming DMs."""
+                try:
+                    thread = await self.get_or_create_dm_thread(message.author)
+
+                    full = message.content or "*(No text content)*"
+                    for chunk in (full[i:i + 1024] for i in range(0, len(full), 1024)):
+                        if chunk.strip().startswith("!"):
+                            continue
+                        await thread.send(
+                            f"📥 **Received from {message.author.display_name}**:\n{chunk}"
+                        )
+
+                    for att in message.attachments:
+                        await thread.send(f"📎 Received attachment: {att.url}")
+                except Exception as e:
+                    print(f"[ERROR] DM logging failed: {e}")
+
             await ctx.send('❌ Cannot DM user (Privacy Settings).')
